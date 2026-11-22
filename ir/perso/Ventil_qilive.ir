@@ -1,0 +1,32 @@
+Filetype: IR signals file
+Version: 1
+# 
+name: Off
+type: parsed
+protocol: NEC
+address: 00 00 00 00
+command: 46 00 00 00
+# 
+name: Eau
+type: parsed
+protocol: NEC
+address: 00 00 00 00
+command: 4A 00 00 00
+# 
+name: Yentil
+type: parsed
+protocol: NEC
+address: 00 00 00 00
+command: 0C 00 00 00
+# 
+name: NEC_07
+type: parsed
+protocol: NEC
+address: 00 00 00 00
+command: 07 00 00 00
+# 
+name: NEC_42
+type: parsed
+protocol: NEC
+address: 00 00 00 00
+command: 42 00 00 00

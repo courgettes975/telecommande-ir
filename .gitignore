@@ -1,0 +1,10 @@
+venv/
+__pycache__/
+*.pyc
+*.log
+coffre.json*
+cle_coffre*
+*.enc
+*.key
+*.p12
+*.pfx

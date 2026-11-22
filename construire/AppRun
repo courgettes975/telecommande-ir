@@ -1,0 +1,8 @@
+#!/bin/bash
+HERE="$(dirname "$(readlink -f "$0")")"
+DEST="${XDG_DATA_HOME:-$HOME/.local/share}/rpi-apps/telecommande"
+mkdir -p "$DEST"
+cp -f "$HERE"/usr/share/rpi-app/*.py "$DEST"/
+cd "$DEST" || exit 1
+export TELECOMMANDE_DONNEES="$HERE/usr/share/rpi-app/ir"
+exec python3 "telecommande.py" "$@"
