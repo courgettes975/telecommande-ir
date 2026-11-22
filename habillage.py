@@ -267,6 +267,86 @@ def icone(c, nom, x, y, r, col=TEXTE, fond=CARTE):
         O(-.45, -.45, .45, .45)
 
 
+class Pivot:
+    """Proxy de canevas qui tourne tout le dessin de 90 degres dans le sens trigonometrique
+    (anti-horaire). On dessine dans un repere PORTRAIT (largeur = hauteur physique,
+    hauteur = largeur physique) et le resultat remplit l'ecran paysage physique.
+
+    But : reutiliser tel quel dessine_barre, rrect, icone, dessine_ligne... sans les
+    reecrire. Seules les coordonnees et l'angle du texte changent.
+
+    Repere physique : W x H (ex. 480 x 320).
+    Repere logique (portrait) : lw x lh = H x W (ex. 320 x 480).
+    Passage logique (x, y) -> physique (X, Y) :  X = y ;  Y = lw - x   (lw = H).
+    Inverse physique (X, Y) -> logique (x, y) :  x = lw - Y = H - Y ;  y = X.
+    """
+
+    def __init__(self, toile, w, h):
+        self.c = toile
+        self.W, self.H = w, h          # taille physique du canevas
+        self.lw, self.lh = h, w        # taille logique (portrait)
+
+    # ----- transformation -----
+    def pt(self, x, y):
+        return (y, self.lw - x)
+
+    def inverse(self, X, Y):
+        """Coordonnees physiques d'un evenement -> coordonnees logiques (portrait)."""
+        return (self.lw - Y, X)
+
+    def _coords(self, args):
+        """Aplati les arguments de coordonnees (nombres ou une liste) et les tourne."""
+        plats = []
+        for a in args:
+            if isinstance(a, (list, tuple)):
+                plats.extend(a)
+            else:
+                plats.append(a)
+        out = []
+        for i in range(0, len(plats) - 1, 2):
+            X, Y = self.pt(plats[i], plats[i + 1])
+            out.extend((X, Y))
+        return out
+
+    @staticmethod
+    def _bbox(x1, y1, x2, y2, pt):
+        X1, Y1 = pt(x1, y1)
+        X2, Y2 = pt(x2, y2)
+        return (min(X1, X2), min(Y1, Y2), max(X1, X2), max(Y1, Y2))
+
+    # ----- primitives (memes signatures que tk.Canvas) -----
+    def create_line(self, *args, **kw):
+        return self.c.create_line(*self._coords(args), **kw)
+
+    def create_polygon(self, *args, **kw):
+        return self.c.create_polygon(*self._coords(args), **kw)
+
+    def create_oval(self, x1, y1, x2, y2, **kw):
+        return self.c.create_oval(*self._bbox(x1, y1, x2, y2, self.pt), **kw)
+
+    def create_rectangle(self, x1, y1, x2, y2, **kw):
+        return self.c.create_rectangle(*self._bbox(x1, y1, x2, y2, self.pt), **kw)
+
+    def create_arc(self, x1, y1, x2, y2, **kw):
+        kw["start"] = kw.get("start", 0) + 90        # +90 deg : rotation trigo
+        return self.c.create_arc(*self._bbox(x1, y1, x2, y2, self.pt), **kw)
+
+    def create_text(self, x, y, **kw):
+        X, Y = self.pt(x, y)
+        kw["angle"] = (kw.get("angle", 0) + 90) % 360
+        return self.c.create_text(X, Y, **kw)
+
+    # ----- divers -----
+    def delete(self, *a):
+        return self.c.delete(*a)
+
+    def winfo_width(self):
+        return self.lw
+
+    def winfo_height(self):
+        return self.lh
+
+
 def confirme_quitter(racine):
     return True  # fermeture directe, sans confirmation
 

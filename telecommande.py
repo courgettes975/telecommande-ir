@@ -95,6 +95,21 @@ class Application:
 
         self.barre = H.BarreHaut(racine, s, "Télécommande", "envoyer", H.ORANGE, self.quitter)
         self.barre.pack(fill="x")
+        # affichage portrait de la vue telecommande (canevas tourne 90 deg, sens trigo)
+        self.toile = None               # canevas plein ecran du mode portrait
+        self.decal_p = 0                # defilement de la grille en portrait
+        self.zones_p = []               # zones cliquables (coords logiques portrait)
+        self._grid_p = None             # geometrie de la grille (pour defilement/tactile)
+        self._p_drag = False
+        self._x0 = self._d0 = 0
+        # toute mise a jour d'info doit aussi rafraichir la barre portrait
+        _maj_info_barre = self.barre.maj_info
+
+        def maj_info(texte, couleur=H.SOUS):
+            _maj_info_barre(texte, couleur)
+            if self.toile is not None:
+                self.dessine_portrait()
+        self.barre.maj_info = maj_info
         haut = tk.Frame(racine, bg=H.FOND)
         haut.pack(fill="x", padx=int(6 * s), pady=(int(5 * s), 0))
         self.b_retour = H.Bouton(haut, s, "Retour", self.retour, H.CARTE2, "haut", 11, haut=38)
@@ -365,13 +380,170 @@ class Application:
         return "%d codes" % n
 
     def rend_visible(self):
-        ligne = self.choix // COLONNES if self.vue == "telecommande" else self.choix
+        if self.vue == "telecommande":
+            # vue d'une telecommande : affichage PORTRAIT (ecran tourne 90 deg, sens trigo)
+            if self.toile is None:
+                self.entre_portrait()
+            g = self._grid_p
+            if g:
+                y0, lhrow, hgrid = g[0], g[1], g[4]
+                ligne = self.choix // COLONNES
+                if ligne * lhrow < self.decal_p:
+                    self.decal_p = ligne * lhrow
+                elif (ligne + 1) * lhrow > self.decal_p + hgrid:
+                    self.decal_p = (ligne + 1) * lhrow - hgrid
+            self.dessine_portrait()
+            return
+        # vue parcours : affichage paysage habituel
+        if self.toile is not None:
+            self.sort_portrait()
+        ligne = self.choix
         lh, h = self.liste.lh, max(1, self.liste.winfo_height())
         if ligne * lh < self.liste.decal:
             self.liste.decal = ligne * lh
         elif (ligne + 1) * lh > self.liste.decal + h:
             self.liste.decal = (ligne + 1) * lh - h
         self.liste.dessine()
+
+    def redessine(self):
+        """Redessine la vue courante (portrait si une telecommande est ouverte)."""
+        if self.toile is not None:
+            self.dessine_portrait()
+        else:
+            self.liste.dessine()
+
+    # ----- affichage portrait de la vue telecommande -----
+    def entre_portrait(self):
+        if self.toile is not None:
+            return
+        self.decal_p = 0
+        self.toile = tk.Canvas(self.racine, bg=H.FOND, highlightthickness=0, bd=0)
+        self.toile.place(x=0, y=0, relwidth=1, relheight=1)
+        tk.Misc.tkraise(self.toile)     # Canvas.tkraise vise les items ; on veut le widget
+        self.toile.bind("<ButtonPress-1>", self._p_press)
+        self.toile.bind("<B1-Motion>", self._p_motion)
+        self.toile.bind("<ButtonRelease-1>", self._p_release)
+        self.toile.bind("<Configure>", lambda e: self.dessine_portrait())
+
+    def sort_portrait(self):
+        if self.toile is not None:
+            self.toile.destroy()
+            self.toile = None
+            self._grid_p = None
+
+    def _p_bouton(self, P, x1, y1, x2, y2, texte, nom_icone, couleur, action):
+        s = self.s
+        H.rrect(P, x1, y1, x2, y2, int(10 * s), couleur)
+        cy, h = (y1 + y2) / 2, y2 - y1
+        r = min(h * 0.3, 12 * s * 0.9)
+        tw = len(texte) * 12 * 0.6 * s
+        x0 = (x1 + x2) / 2 - (2 * r + 8 * s + tw) / 2
+        H.icone(P, nom_icone, x0 + r, cy, r, H.TEXTE, couleur)
+        P.create_text(x0 + 2 * r + 8 * s, cy, text=texte, fill=H.TEXTE, font=H.police(s, 12, True), anchor="w")
+        self.zones_p.append((x1, y1, x2, y2, action))
+
+    def _p_favori(self):
+        self.bascule_favori(self.telecommande)
+        self.dessine_portrait()
+
+    def dessine_portrait(self):
+        if self.toile is None:
+            return
+        s = self.s
+        W = max(1, self.toile.winfo_width())
+        Hh = max(1, self.toile.winfo_height())
+        if W < 20:
+            return
+        P = H.Pivot(self.toile, W, Hh)
+        lw, lh = P.winfo_width(), P.winfo_height()     # repere portrait
+        P.delete("all")
+        self.zones_p = []
+        # 1) barre du haut (titre court = nom de la telecommande, + etat de l'emetteur)
+        titre = irfichiers.nom_lisible(os.path.basename(self.telecommande)) if self.telecommande else "Télécommande"
+        z = H.dessine_barre(P, s, lw, titre, "envoyer", H.ORANGE, self.barre.info, self.barre.info_col)
+        self.zones_p.append((z[0], z[1], z[2], z[3], self.quitter))
+        hb = int(36 * s)
+        # 2) ligne de controles : Retour (gauche) ; Favori ou Arreter (droite)
+        yc, hc = hb + int(4 * s), int(40 * s)
+        self._p_bouton(P, int(6 * s), yc, lw / 2 - int(3 * s), yc + hc, "Retour", "haut", H.CARTE2, self.retour)
+        rx1, rx2 = lw / 2 + int(3 * s), lw - int(6 * s)
+        if self.universelle:
+            if self.arret is not None:
+                self._p_bouton(P, rx1, yc, rx2, yc + hc, "Arrêter", "croix", H.ROUGE, self.arrete_balayage)
+        else:
+            fav = self.est_favori(self.telecommande)
+            self._p_bouton(P, rx1, yc, rx2, yc + hc, "Favori", "check" if fav else "plus",
+                           H.VERT if fav else H.CARTE2, self._p_favori)
+        # 3) sous-titre (contexte)
+        yt = yc + hc + int(4 * s)
+        P.create_text(int(10 * s), yt + int(9 * s), text=self.titre.cget("text"), fill=H.SOUS,
+                      font=H.police(s, 10), anchor="w", width=lw - int(16 * s))
+        # 4) grille defilante de boutons (reutilise dessine_ligne via le proxy tourne)
+        y0 = yt + int(26 * s)
+        lhrow = int(54 * s)
+        marge = int(6 * s)
+        n = len(self.items)
+        total = n * lhrow
+        hgrid = max(1, lh - y0)
+        barw = int(10 * s) if total > hgrid else 0
+        gridw = lw - 2 * marge - barw
+        self.decal_p = max(0, min(self.decal_p, max(0, total - hgrid)))
+        first = max(0, int(self.decal_p // lhrow))
+        last = min(n, int((self.decal_p + hgrid) // lhrow) + 1)
+        for i in range(first, last):
+            ry1 = y0 + i * lhrow - self.decal_p
+            self.dessine_ligne(P, i, self.items[i], marge, ry1, marge + gridw, ry1 + lhrow, False)
+        self._grid_p = (y0, lhrow, hgrid, total, hgrid, marge, gridw)
+        # 5) barre de defilement
+        if total > hgrid:
+            x2 = lw - marge
+            hbar = max(int(40 * s), hgrid * hgrid / float(total))
+            hbar = min(hbar, hgrid)
+            ybar = y0 + (hgrid - hbar) * self.decal_p / float(max(1, total - hgrid))
+            H.rrect(P, x2 - barw + 2, y0, x2, y0 + hgrid, int(4 * s), H.CARTE)
+            H.rrect(P, x2 - barw + 4, ybar + 2, x2 - 2, ybar + hbar - 2, int(4 * s), H.SOUS)
+
+    def _p_logique(self, e):
+        """Coordonnees logiques (portrait) d'un evenement souris sur le canevas tourne."""
+        P = H.Pivot(self.toile, max(1, self.toile.winfo_width()), max(1, self.toile.winfo_height()))
+        return P.inverse(e.x, e.y)
+
+    def _p_press(self, e):
+        lx, ly = self._p_logique(e)
+        self._p_drag = False
+        g = self._grid_p
+        self._x0, self._d0 = e.x, self.decal_p         # defilement = glissement physique en X (= Y logique)
+        self._dans_grille = bool(g) and g[0] <= ly <= g[0] + g[4]
+
+    def _p_motion(self, e):
+        if not getattr(self, "_dans_grille", False):
+            return
+        if abs(e.x - self._x0) > 6 * self.s:
+            self._p_drag = True
+        if self._p_drag:
+            self.decal_p = self._d0 - (e.x - self._x0)
+            self.dessine_portrait()
+
+    def _p_release(self, e):
+        if self._p_drag:
+            self._p_drag = False
+            return
+        lx, ly = self._p_logique(e)
+        for x1, y1, x2, y2, action in self.zones_p:
+            if x1 <= lx <= x2 and y1 <= ly <= y2:
+                action()
+                return
+        g = self._grid_p
+        if not g:
+            return
+        y0, lhrow, hgrid, total, _, marge, gridw = g
+        if not (y0 <= ly <= y0 + hgrid and marge <= lx <= marge + gridw):
+            return
+        ligne = int((ly - y0 + self.decal_p) // lhrow)
+        col = int((lx - marge) // (gridw / float(COLONNES)))
+        if 0 <= ligne < len(self.items) and 0 <= col < len(self.items[ligne]):
+            self.choix = ligne * COLONNES + col
+            self.emet(self.choix)
 
     # ----- actions -----
     def tap(self, i, xrel):
@@ -413,7 +585,7 @@ class Application:
         self.arret = threading.Event()
         arret = self.arret
         self.b_plus.maj(nom_icone="croix", couleur=H.ROUGE)
-        self.liste.dessine()
+        self.redessine()
         self.barre.maj_info("%s : %d codes à essayer, « Arrêter » dès que ça réagit" % (sig["affiche"], len(codes)), H.ORANGE)
 
         def progression(i):
@@ -428,7 +600,7 @@ class Application:
     def maj_progression(self, k, i):
         if self.envoi == k and self.arret is not None:
             self.progres = i
-            self.liste.dessine()
+            self.redessine()
 
     def arrete_balayage(self):
         """Arrete un balayage en cours. Retourne True s'il y en avait un."""
@@ -450,7 +622,7 @@ class Application:
             self.barre.maj_info("%s : arrêté après le code %d / %d" % (sig["affiche"], max(1, emis), total), H.VERT)
         else:
             self.barre.maj_info("%s : les %d codes ont été envoyés" % (sig["affiche"], total), H.SOUS)
-        self.liste.dessine()
+        self.redessine()
 
     def emet(self, k):
         if not (0 <= k < len(self.signaux)):
@@ -470,7 +642,7 @@ class Application:
             self.barre.maj_info("Touche non utilisable : %s" % e, H.ORANGE)
             return
         self.envoi = k
-        self.liste.dessine()
+        self.redessine()
         self.barre.maj_info("Envoi : %s" % sig["nom"].replace("_", " "), H.ORANGE)
 
         def travail():
@@ -487,7 +659,7 @@ class Application:
                 threading.Thread(target=self.prepare_emetteur, daemon=True).start()
         else:
             self.barre.maj_info("Envoyé : %s" % sig["nom"].replace("_", " "), H.VERT)
-        self.liste.dessine()
+        self.redessine()
 
     def touche(self, e):
         k = e.keysym
